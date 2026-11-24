@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<title>Lanserhof Tegernsee — KZ</title>
+<link rel="stylesheet" href="node_modules/@fontsource/cormorant-garamond/300.css">
+<link rel="stylesheet" href="node_modules/@fontsource/cormorant-garamond/400.css">
+<link rel="stylesheet" href="node_modules/@fontsource/cormorant-garamond/500.css">
+<link rel="stylesheet" href="node_modules/@fontsource/cormorant-garamond/300-italic.css">
+<link rel="stylesheet" href="node_modules/@fontsource/cormorant-garamond/400-italic.css">
+<style>html,body{margin:0;background:#000}canvas{display:block;width:100vw;height:auto}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* Lanserhof Tegernsee — Kazakh concept spot. Every frame is computed from time alone: window.seek(t). */
+const W = 1920, H = 1080, DUR = 84;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const bufs = [mk(), mk()], bufC = mk(), bufL = mk(), bufS = mk(480, 270);
+
+const SERIF = '"Cormorant Garamond", Georgia, serif', SANS = 'Inter, "DejaVu Sans", sans-serif';
+const hx = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const C = { cream: '#F2EDE4', gold: '#C9B48A', ink: '#0C1210', soft: 'rgba(242,237,228,0.72)', dim: 'rgba(242,237,228,0.45)' };
+
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const ss = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const eio = t => (t = clamp(t), t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const eo = t => 1 - Math.pow(1 - clamp(t), 4);
+const mixc = (a, b, t) => a.map((v, i) => Math.round(lerp(v, b[i], t)));
+const rgba = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function makeNoise(seed) { const r = rng(seed), p = []; for (let i = 0; i < 1024; i++) p.push(r()); return x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return lerp(p[i & 1023], p[(i + 1) & 1023], u); }; }
+const fbm = (n, x, o = 5) => { let s = 0, a = .5, f = 1; for (let i = 0; i < o; i++) { s += a * n(x * f); f *= 2.03; a *= .5; } return s; };
+const ridged = (n, x, o = 5) => { let s = 0, a = .5, f = 1; for (let i = 0; i < o; i++) { s += a * (1 - Math.abs(2 * n(x * f) - 1)); f *= 2.07; a *= .5; } return s; };
+const NZ = [makeNoise(11), makeNoise(23), makeNoise(37), makeNoise(51), makeNoise(67)];
+
+/* ---------- text ---------- */
+function txt(c, s, x, y, o = {}) {
+  c.save();
+  c.globalAlpha *= (o.alpha ?? 1);
+  c.font = `${o.italic ? 'italic ' : ''}${o.weight || 300} ${o.size || 40}px ${o.font || SERIF}`;
+  c.fillStyle = o.color || C.cream; c.textAlign = o.align || 'left'; c.textBaseline = 'alphabetic';
+  c.letterSpacing = (o.track || 0) + 'px';
+  if (o.shadow) { c.shadowColor = 'rgba(0,0,0,.45)'; c.shadowBlur = o.shadow; }
+  c.fillText(s, x, y); c.restore();
+}
+// fade/slide in at t0, out at t1
+function rev(c, s, x, y, o, t, t0, t1 = 1e9, d = 1.1) {
+  const p = eo((t - t0) / d), q = 1 - ss(t1 - .6, t1, t);
+  if (p <= 0 || q <= 0) return;
+  txt(c, s, x, y + (1 - p) * 16, { ...o, alpha: (o.alpha ?? 1) * p * q });
+}
+function line(c, x1, y1, x2, y2, col, a = 1, w = 1) { c.save(); c.globalAlpha *= a; c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); c.restore(); }
+function wrap(c, s, maxW, font) { c.save(); c.font = font; const words = s.split(' '), out = []; let cur = ''; for (const w of words) { const tst = cur ? cur + ' ' + w : w; if (c.measureText(tst).width > maxW && cur) { out.push(cur); cur = w; } else cur = tst; } if (cur) out.push(cur); c.restore(); return out; }
+
+/* ---------- precomputed textures ---------- */
+const mist = mk(2600, 600);
+(() => { const m = mist.getContext('2d'), r = rng(5); for (let i = 0; i < 140; i++) { const x = 200 + r() * 2200, y = 240 + r() * 120, rad = 80 + r() * 150; const g = m.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, 'rgba(255,255,255,0.10)'); g.addColorStop(1, 'rgba(255,255,255,0)'); m.fillStyle = g; m.fillRect(x - rad, y - rad, rad * 2, rad * 2); } })();
+const grains = [0, 1, 2, 3].map(k => { const g = mk(640, 360), gc = g.getContext('2d'), im = gc.createImageData(640, 360), r = rng(100 + k); for (let i = 0; i < im.data.length; i += 4) { const v = r() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; } gc.putImageData(im, 0, 0); return g; });
+const vign = mk(); (() => { const v = vign.getContext('2d'), g = v.createRadialGradient(W / 2, H / 2, H * .35, W / 2, H / 2, H * 1.05); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)'); v.fillStyle = g; v.fillRect(0, 0, W, H); })();
+const TREES = (() => { const r = rng(77), a = []; for (let i = 0; i < 150; i++) { const x = -200 + r() * 2400; if (x > 1090 && x < 1700 && r() < .85) continue; a.push({ x, h: 26 + r() * 44, j: r() }); } return a.sort((p, q) => p.h - q.h); })();
+const FAR_TREES = (() => { const r = rng(91), a = []; for (let i = 0; i < 260; i++) a.push({ x: -300 + r() * 2600, h: 8 + r() * 12 }); return a; })();
+
+/* ---------- landscape (Bavarian Alps, lake, resort on the hill) ---------- */
+const SKY = { m: ['#5C7E98', '#C6D2D2', '#F2DFC0'].map(hx), d: ['#2A3452', '#BC8B78', '#F6B67C'].map(hx) };
+const HY = H * 0.585, LB = H * 0.735;
+const hillY = x => H * 0.735 + 0.05 * H * Math.sin(x * 0.0019 + 0.9) + 0.03 * H * (fbm(NZ[3], x * 0.003, 3) - .5) - 0.075 * H * Math.exp(-Math.pow((x - 1390) / 520, 2));
+function conifer(c, x, y, h, col, n = 3) { const w = h * (n > 3 ? .26 : .36); c.fillStyle = col; c.beginPath(); for (let k = 0; k < n; k++) { const f = k / n, ty = y - h * f * .82, tw = w * (1 - f * .85), th = h * (n > 3 ? .26 : .55); c.moveTo(x - tw, ty); c.quadraticCurveTo(x - tw * .4, ty - th * .35, x, ty - th - (k === n - 1 ? h * .1 : 0)); c.quadraticCurveTo(x + tw * .4, ty - th * .35, x + tw, ty); } c.fill(); c.fillRect(x - h * .015, y - 2, h * .03, h * .1); }
+function ridgePath(c, f, x0, x1, step) { c.beginPath(); c.moveTo(x0, H * 1.2); for (let x = x0; x <= x1; x += step) c.lineTo(x, f(x)); c.lineTo(x1, H * 1.2); c.closePath(); }
+
+function land(c, o) {
+  const tod = o.tod, sk = [0, 1, 2].map(i => mixc(SKY.m[i], SKY.d[i], tod));
+  const z = o.zoom || 1, fx = o.fx || 0, fy = o.fy || 0, pan = o.pan || 0, t = o.t || 0;
+  c.save();
+  c.translate(W / 2, H / 2); c.scale(z, z); c.translate(-W / 2 - fx, -H / 2 - fy);
+  const X0 = -600, X1 = W + 600;
+  // sky
+  let g = c.createLinearGradient(0, -300, 0, HY); g.addColorStop(0, rgba(sk[0])); g.addColorStop(.62, rgba(sk[1])); g.addColorStop(1, rgba(sk[2]));
+  c.fillStyle = g; c.fillRect(X0, -900, X1 - X0, HY + 910);
+  const sx = W * .70 - pan * .02, sy = HY - 150 + tod * 60;
+  g = c.createRadialGradient(sx, sy, 0, sx, sy, 760); g.addColorStop(0, rgba(mixc(sk[2], [255, 248, 230], .6), .8 + .2 * tod)); g.addColorStop(.25, rgba(sk[2], .28)); g.addColorStop(1, rgba(sk[2], 0));
+  c.fillStyle = g; c.fillRect(X0, -900, X1 - X0, HY + 910);
+  // mountains
+  const L = [
+    { f: x => HY - H * .52 * ridged(NZ[0], (x + pan * .05) * .0016 + 3.1), col: mixc(sk[1], [110, 126, 146], .45), snow: .70 },
+    { f: x => HY - H * .30 * ridged(NZ[1], (x + pan * .12) * .0025 + 7.7) + 10, col: mixc(sk[1], [66, 84, 92], .66), snow: .84 },
+    { f: x => HY - H * .11 * fbm(NZ[2], (x + pan * .25) * .0042 + 1.3) + 6, col: mixc(sk[1], [36, 54, 47], .84) },
+  ];
+  const drawMtn = (lay, alpha = 1) => {
+    c.save(); c.globalAlpha *= alpha;
+    ridgePath(c, lay.f, X0, X1, 5); const mg = c.createLinearGradient(0, HY - H * .5, 0, HY); mg.addColorStop(0, rgba(mixc(lay.col, mixc(sk[2], [255, 250, 240], .5), .28))); mg.addColorStop(1, rgba(mixc(lay.col, [20, 30, 28], .12))); c.fillStyle = mg; c.fill();
+    if (lay.snow) { // snow band on high peaks
+      c.beginPath(); const pts = [];
+      for (let x = X0; x <= X1; x += 5) { const y = lay.f(x), hn = (HY - y) / (H * .5); pts.push([x, y, Math.min(46, Math.max(0, hn - lay.snow) * 230)]); }
+      c.moveTo(pts[0][0], pts[0][1]); for (const p of pts) c.lineTo(p[0], p[1]); for (let i = pts.length - 1; i >= 0; i--) c.lineTo(pts[i][0], pts[i][1] + pts[i][2]);
+      c.closePath(); c.fillStyle = rgba(mixc([248, 246, 242], sk[2], .2 + tod * .35), .78); c.fill();
+    }
+    c.restore();
+  };
+  const haze = a => { const hg = c.createLinearGradient(0, HY - H * .32, 0, HY); hg.addColorStop(0, rgba(sk[1], 0)); hg.addColorStop(1, rgba(sk[2], a)); c.fillStyle = hg; c.fillRect(X0, HY - H * .32, X1 - X0, H * .32 + 2); };
+  drawMtn(L[0]); haze(.42); drawMtn(L[1]); haze(.30);
+  drawMtn(L[2]);
+  for (const tr of FAR_TREES) { const x = tr.x + pan * .25 * 0; const y = L[2].f(tr.x); conifer(c, tr.x, y + 4, tr.h, rgba(mixc(L[2].col, [20, 32, 28], .35))); }
+  haze(.12);
+  // lake + reflections
+  g = c.createLinearGradient(0, HY, 0, LB); g.addColorStop(0, rgba(mixc(sk[2], sk[1], .4))); g.addColorStop(1, rgba(mixc(sk[0], [14, 24, 26], .55)));
+  c.fillStyle = g; c.fillRect(X0, HY, X1 - X0, LB - HY + 200);
+  c.save(); c.beginPath(); c.rect(X0, HY, X1 - X0, LB - HY + 200); c.clip();
+  c.translate(0, 2 * HY); c.scale(1, -1);
+  drawMtn(L[0], .22); drawMtn(L[1], .26); drawMtn(L[2], .42);
+  c.restore();
+  c.save(); const rr = rng(3);
+  for (let i = 0; i < 90; i++) { const p = Math.pow(rr(), 1.4), y = HY + 4 + p * (LB - HY), x = X0 + rr() * (X1 - X0), w = 30 + rr() * 180 * (1 - p * .5); const fl = .5 + .5 * Math.sin(t * (0.8 + rr() * 1.4) + i); c.globalAlpha = (.05 + .12 * (1 - p)) * fl; c.fillStyle = rgba(mixc(sk[2], [255, 255, 255], .4)); c.fillRect(x + Math.sin(t * .3 + i) * 20, y, w, 1.4 + p * 1.6); }
+  c.restore();
+  // low mist over the lake
+  c.save(); c.globalAlpha = (o.mist ?? .6); const mo = ((t * 14 + pan * .3) % 1300 + 1300) % 1300; c.drawImage(mist, -mo - 600, HY - 330); c.drawImage(mist, -mo + 1700, HY - 330); c.restore();
+  // foreground hill (golf meadow) with resort
+  c.save(); c.translate(pan * .35, 0);
+  const mead = mixc(hx('#7E9667'), hx('#596443'), tod);
+  ridgePath(c, hillY, X0 - 400, X1 + 400, 8);
+  g = c.createLinearGradient(0, H * .62, 0, H); g.addColorStop(0, rgba(mead)); g.addColorStop(1, rgba(mixc(mead, [24, 34, 26], .75))); c.fillStyle = g; c.fill();
+  c.save(); ridgePath(c, hillY, X0 - 400, X1 + 400, 8); c.clip();
+  for (let k = 0; k < 5; k++) { const ex = 300 + k * 420, ey = hillY(ex) + 60 + k % 2 * 40; c.fillStyle = rgba(mixc(mead, [190, 205, 150], .5), .16); c.beginPath(); c.ellipse(ex, ey, 260, 34, -.05, 0, 7); c.fill(); }
+  c.restore();
+  if ((o.resort ?? 1) > 0) resort(c, o.resort ?? 1, tod, mead);
+  for (const tr of TREES) { const y = hillY(tr.x) + 6; conifer(c, tr.x, y, tr.h, rgba(mixc(mixc(mead, [18, 30, 22], .78), sk[1], .1))); }
+  c.restore();
+  // foreground framing trees (strongest parallax)
+  c.save(); c.translate(pan * .9, 0);
+  const fr = rng(41), fcol = rgba(mixc([16, 24, 20], sk[0], .08));
+  if ((o.fg ?? 1) > 0) for (let i = 0; i < 7; i++) { const left = i < 3, x = left ? -260 + fr() * 300 : W + 60 - fr() * 300, hh = 380 + fr() * 300; conifer(c, x, H + 40, hh, fcol, 10); }
+  c.restore();
+  c.restore();
+}
+function resort(c, a, tod, mead) {
+  const bx = 1150, bw = 470, by = hillY(1390) + 2;
+  c.save(); c.globalAlpha *= a;
+  const fac = mixc(hx('#E3DDD0'), hx('#B7A792'), tod * .7), glass = mixc(hx('#33403F'), hx('#1E2626'), tod), warm = '#FFCB86';
+  c.fillStyle = 'rgba(0,0,0,.18)'; c.beginPath(); c.ellipse(bx + bw / 2, by + 6, bw * .62, 12, 0, 0, 7); c.fill();
+  const slab = (x, y, w, h) => { c.fillStyle = rgba(fac); c.fillRect(x, y - h, w, h * .28); c.fillStyle = rgba(glass); c.fillRect(x + 4, y - h * .72, w - 8, h * .58); c.fillStyle = rgba(fac); c.fillRect(x, y - h * .14, w, h * .14);
+    for (let i = 0; i < w / 14; i++) { const wx = x + 8 + i * 14; c.globalAlpha = a * (.04 + .96 * tod * tod) * (.5 + .5 * ((i * 7) % 5 > 1)); c.fillStyle = warm; c.fillRect(wx, y - h * .66, 8, h * .46); } c.globalAlpha = a; };
+  slab(bx, by, bw, 30); slab(bx + 70, by - 30, bw - 150, 26); slab(bx + 150, by - 56, bw - 300, 22);
+  c.fillStyle = rgba(mixc(fac, [255, 255, 255], .3)); c.fillRect(bx - 6, by - 31, bw + 12, 2); c.fillRect(bx + 64, by - 57, bw - 138, 2);
+  // glass pavilion
+  const px = 1690, py = hillY(1720) + 2; c.fillStyle = rgba(glass, .9); c.fillRect(px, py - 24, 64, 24); c.fillStyle = rgba(fac); c.fillRect(px - 4, py - 27, 72, 3);
+  c.globalAlpha = a * (.2 + .8 * tod); c.fillStyle = warm; c.fillRect(px + 6, py - 20, 52, 14);
+  c.restore();
+}
+
+/* ---------- scenes ---------- */
+function legibility(c, side = 'left', a = .55) { const g = side === 'left' ? c.createLinearGradient(0, 0, W * .62, 0) : c.createLinearGradient(0, 0, 0, H); if (side === 'left') { g.addColorStop(0, `rgba(8,12,10,${a})`); g.addColorStop(1, 'rgba(8,12,10,0)'); } else { g.addColorStop(0, `rgba(8,12,10,${a})`); g.addColorStop(.45, 'rgba(8,12,10,0)'); g.addColorStop(.7, 'rgba(8,12,10,0)'); g.addColorStop(1, `rgba(8,12,10,${a})`); } c.fillStyle = g; c.fillRect(0, 0, W, H); }
+
+// S1 — opening aerial
+function s1(c, t) {
+  const p = t / 10.6;
+  land(c, { t, tod: .2, zoom: lerp(1.04, 1.24, eio(p)), fx: lerp(-60, 120, eio(p)), fy: lerp(-90, 60, eio(p)), pan: lerp(-160, 160, p), resort: ss(3.5, 8.5, t), mist: lerp(1, .5, p) });
+  legibility(c, 'top', .35);
+  rev(c, 'Денсаулығыңыз жай демалыстан да', W / 2, 250, { size: 74, align: 'center', shadow: 24 }, t, 2.2, 10.2, 1.6);
+  rev(c, 'артық нәрсеге лайық.', W / 2, 340, { size: 74, align: 'center', italic: true, shadow: 24 }, t, 2.9, 10.2, 1.6);
+}
+// S2 — location
+function s2(c, t) {
+  const p = t / 10.6;
+  land(c, { t: t + 10, tod: .30, zoom: lerp(1.85, 2.0, eio(p)), fx: 225 + lerp(-30, 40, p), fy: 140, pan: lerp(30, -40, p), resort: 1, mist: .35, fg: 0 });
+  legibility(c, 'left', .72);
+  rev(c, 'БАВАРИЯ  ·  ГЕРМАНИЯ', 140, 330, { font: SANS, size: 20, weight: 500, color: C.gold, track: 6 }, t, .6);
+  rev(c, 'Lanserhof Tegernsee', 136, 430, { size: 104, weight: 300 }, t, 1.0);
+  c.save(); c.globalAlpha = eo((t - 1.8) / 1.2); line(c, 140, 478, 140 + 420 * eo((t - 1.8) / 1.6), 478, C.gold, .8, 1.2); c.restore();
+  rev(c, 'Тегернзе көлінің үстінде, Альпі етегінде', 140, 548, { size: 40, italic: true, color: C.cream }, t, 2.2);
+  rev(c, 'Мюнхен әуежайынан ~90 км  ·  көлікпен шамамен 1 сағат', 140, 614, { font: SANS, size: 25, color: C.soft }, t, 3.2);
+  rev(c, 'Әуежай мен вокзалдан трансфер — сұраныс бойынша', 140, 656, { font: SANS, size: 25, color: C.soft }, t, 3.8);
+  rev(c, 'Gut Steinberg 1–4, 83666 Waakirchen', 140, 698, { font: SANS, size: 25, color: C.soft }, t, 4.4);
+  rev(c, 'World’s Best Medical Spa 2025  ·  21 000 м²  ·  18 шұңқырлы гольф алаңы', 140, 800, { font: SANS, size: 19, weight: 500, color: C.gold, track: 2 }, t, 5.4);
+  // mini route card
+  const a = eo((t - 3) / 1.2); if (a > 0) {
+    c.save(); c.globalAlpha = a; const x0 = 1300, y0 = 860, x1 = 1760, y1 = 800;
+    c.fillStyle = 'rgba(12,18,16,.45)'; c.beginPath(); c.roundRect(1250, 730, 580, 190, 18); c.fill(); c.strokeStyle = 'rgba(242,237,228,.18)'; c.stroke();
+    const k = eo((t - 3.4) / 2.2); c.setLineDash([8, 10]); line(c, x0, y0, lerp(x0, x1, k), lerp(y0, y1, k), C.cream, .7, 2); c.setLineDash([]);
+    c.fillStyle = C.cream; c.beginPath(); c.arc(x0, y0, 6, 0, 7); c.fill(); c.fillStyle = C.gold; c.beginPath(); c.arc(x1, y1, 7 * k, 0, 7); c.fill();
+    txt(c, 'MUC · Мюнхен', x0 - 8, y0 + 40, { font: SANS, size: 19, color: C.soft }); txt(c, 'Lanserhof', x1 + 8, y1 - 22, { font: SANS, size: 19, color: C.cream, align: 'right' });
+    txt(c, '≈ 90 км', (x0 + x1) / 2, (y0 + y1) / 2 - 18, { size: 30, italic: true, color: C.gold, align: 'center' });
+    c.restore();
+  }
+}
+// S3 — medical excellence
+function s3(c, t) {
+  let g = c.createRadialGradient(W * .66, H * .5, 0, W * .66, H * .5, W * .7); g.addColorStop(0, '#1D2B26'); g.addColorStop(1, '#090E0C'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  const cx = 1230, cy = 500, intro = eo(t / 2);
+  c.save(); c.translate(cx, cy); c.scale(lerp(.92, 1.04, t / 12.6), lerp(.92, 1.04, t / 12.6));
+  for (let i = 0; i < 6; i++) { const r = 120 + i * 62; c.save(); c.globalAlpha = intro * (.10 + .05 * (i % 2)); c.strokeStyle = C.cream; c.lineWidth = 1; c.beginPath(); c.arc(0, 0, r, 0, 7); c.stroke(); c.restore();
+    c.save(); c.rotate(t * (.08 + i * .025) * (i % 2 ? -1 : 1) + i); c.globalAlpha = intro * .55; c.strokeStyle = C.gold; c.lineWidth = 1.6; c.beginPath(); c.arc(0, 0, r, 0, .5 + i * .12); c.stroke(); c.restore(); }
+  c.restore();
+  // HRV / ECG trace
+  const yb = 900, prog = eo((t - .5) / 9) * (W + 100);
+  c.save(); c.strokeStyle = C.gold; c.lineWidth = 2; c.shadowColor = 'rgba(201,180,138,.8)'; c.shadowBlur = 10; c.beginPath();
+  let hx2 = 0, hy2 = yb;
+  for (let x = 0; x <= prog; x += 3) { const per = 210 + 22 * Math.sin(x * .004), ph = (x % per) / per; let y = Math.sin(x * .01) * 4; if (ph > .40 && ph < .44) y -= 14 * Math.sin((ph - .40) / .04 * Math.PI); if (ph > .48 && ph < .50) y += 10; if (ph >= .50 && ph < .53) y -= 70 * Math.sin((ph - .50) / .03 * Math.PI); if (ph > .53 && ph < .56) y += 16; if (ph > .64 && ph < .72) y -= 18 * Math.sin((ph - .64) / .08 * Math.PI); x === 0 ? c.moveTo(x, yb + y) : c.lineTo(x, yb + y); hx2 = x; hy2 = yb + y; }
+  c.stroke(); c.fillStyle = C.cream; c.beginPath(); c.arc(hx2, hy2, 4, 0, 7); c.fill(); c.restore();
+  // labels around rings
+  const labels = [['24 сағаттық HRV', -1.25, 3.2], ['Спироэргометрия', -.62, 4.4], ['Эхокардиография', 0, 5.6], ['Капсулалық эндоскопия', .62, 6.8], ['Ұйқы зертханасы', 1.25, 8.0]];
+  for (const [s, ang, t0] of labels) { const a = eo((t - t0) / 1); if (a <= 0) continue; const r = 360, px = cx + Math.cos(ang) * r, py = cy + Math.sin(ang) * r * .92, right = Math.cos(ang) > -.2, lx = px + (right ? 40 : -40);
+    c.save(); c.globalAlpha = a; c.fillStyle = C.gold; c.beginPath(); c.arc(px, py, 5, 0, 7); c.fill(); line(c, px, py, lx, py, C.gold, .7); c.restore();
+    txt(c, s, lx + (right ? 12 : -12), py + 8, { font: SANS, size: 23, color: C.cream, align: right ? 'left' : 'right', alpha: a }); }
+  rev(c, 'МЕДИЦИНА  ·  НАТУРОПАТИЯ  ·  ДИАГНОСТИКА', 140, 330, { font: SANS, size: 19, weight: 500, color: C.gold, track: 5 }, t, .5);
+  rev(c, 'Дәлелді медицина', 136, 432, { size: 84 }, t, 1.0);
+  rev(c, 'мен табиғи емнің үйлесімі', 136, 520, { size: 84, italic: true }, t, 1.4);
+  rev(c, 'Диагностика мен ем жоспары —', 140, 610, { font: SANS, size: 27, color: C.soft }, t, 2.6);
+  rev(c, 'дәрігеріңізбен бірге, жеке құрылады.', 140, 650, { font: SANS, size: 27, color: C.soft }, t, 2.8);
+}
+// S4 — wellness experience: four vignettes
+function vPool(c, t) {
+  let g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0D2A2C'); g.addColorStop(1, '#1D4B48'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.save(); c.globalCompositeOperation = 'lighter'; c.lineWidth = 2.2;
+  for (let k = 0; k < 34; k++) { c.strokeStyle = `rgba(170,235,220,${.05 + .03 * Math.sin(k + t)})`; c.beginPath(); for (let x = -20; x <= W + 20; x += 16) { const y = k * 36 - 40 + Math.sin(x * .007 + t * .9 + k * 1.7) * 18 + Math.sin(x * .019 - t * .6 + k) * 9; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); }
+  for (let k = 0; k < 40; k++) { c.strokeStyle = `rgba(170,235,220,${.04 + .02 * Math.cos(k - t)})`; c.beginPath(); for (let y = -20; y <= H + 20; y += 16) { const x = k * 52 - 40 + Math.sin(y * .008 - t * .8 + k * 1.3) * 22 + Math.sin(y * .021 + t * .5 + k) * 8; y < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); }
+  c.restore();
+  for (let i = 0; i < 4; i++) { c.save(); c.globalAlpha = .07; c.fillStyle = '#E8FFF8'; c.beginPath(); const x = 300 + i * 420 + Math.sin(t * .2 + i) * 30; c.moveTo(x, 0); c.lineTo(x + 160, 0); c.lineTo(x + 420, H); c.lineTo(x + 180, H); c.fill(); c.restore(); }
+}
+function vMove(c, t) {
+  let g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#2A2723'); g.addColorStop(1, '#4A4036'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  const cx = 1300, cy = 520, br = .5 + .5 * Math.sin(t * 1.15 - 1.2);
+  for (let i = 5; i >= 0; i--) { const r = 150 + br * 70 + i * 70 + ((t * 40) % 70); c.save(); c.globalAlpha = .22 * (1 - i / 6); c.strokeStyle = C.gold; c.lineWidth = 1.4; c.beginPath(); c.arc(cx, cy, r, 0, 7); c.stroke(); c.restore(); }
+  g = c.createRadialGradient(cx, cy, 0, cx, cy, 170 + br * 70); g.addColorStop(0, 'rgba(242,226,196,.55)'); g.addColorStop(1, 'rgba(242,226,196,0)'); c.fillStyle = g; c.beginPath(); c.arc(cx, cy, 170 + br * 70, 0, 7); c.fill();
+  line(c, 0, 820, W, 820, C.cream, .15);
+}
+function vFood(c, t) {
+  c.fillStyle = '#E9E3D8'; c.fillRect(0, 0, W, H);
+  const cx = 1290, cy = 540, rot = t * .05;
+  c.save(); c.shadowColor = 'rgba(60,50,40,.25)'; c.shadowBlur = 60; c.shadowOffsetY = 24; c.fillStyle = '#F8F6F1'; c.beginPath(); c.arc(cx, cy, 330, 0, 7); c.fill(); c.restore();
+  c.save(); c.strokeStyle = 'rgba(120,110,95,.18)'; c.lineWidth = 2; c.beginPath(); c.arc(cx, cy, 250, 0, 7); c.stroke(); c.restore();
+  c.save(); c.translate(cx, cy); c.rotate(rot); const r = rng(9);
+  for (let i = 0; i < 9; i++) { const a = i / 9 * 6.28 + r() * .4, d = 60 + r() * 120; c.save(); c.translate(Math.cos(a) * d, Math.sin(a) * d); c.rotate(a + 1.2 + r()); c.fillStyle = ['#6F8A55', '#88A267', '#5A7448'][i % 3]; c.beginPath(); c.ellipse(0, 0, 54 + r() * 26, 18 + r() * 8, 0, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(-50, 0); c.lineTo(50, 0); c.stroke(); c.restore(); }
+  for (let i = 0; i < 26; i++) { const a = r() * 6.28, d = r() * 170; c.fillStyle = ['#C7A15E', '#B3473A', '#E6D3A5'][i % 3]; c.beginPath(); c.arc(Math.cos(a) * d, Math.sin(a) * d, 5 + r() * 7, 0, 7); c.fill(); }
+  c.restore();
+}
+function vRest(c, t) {
+  c.fillStyle = '#1A1714'; c.fillRect(0, 0, W, H);
+  const wx = 820, wy = 150, ww = 960, wh = 640;
+  const lc = bufL.getContext('2d'); land(lc, { t: t + 40, tod: .66, zoom: 1.35, fx: 300, fy: 120, pan: t * 8, resort: 0, mist: .5 });
+  c.save(); c.beginPath(); c.rect(wx, wy, ww, wh); c.clip(); c.drawImage(bufL, 0, 0, W, H, wx - 200, wy - 60, ww + 400, (ww + 400) * H / W); c.restore();
+  c.save(); c.strokeStyle = '#2A241F'; c.lineWidth = 14; c.strokeRect(wx, wy, ww, wh); line(c, wx + ww / 2, wy, wx + ww / 2, wy + wh, '#2A241F', 1, 10); c.restore();
+  let g = c.createLinearGradient(wx - 140, 0, wx + 60, 0); g.addColorStop(0, 'rgba(26,23,20,1)'); g.addColorStop(1, 'rgba(26,23,20,0)'); c.fillStyle = g; c.fillRect(wx - 140, wy, 200, wh);
+  g = c.createRadialGradient(1840, 960, 0, 1840, 960, 600); g.addColorStop(0, 'rgba(255,196,120,.28)'); g.addColorStop(1, 'rgba(255,196,120,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#231E1A'; c.fillRect(0, 860, W, 220);
+}
+const VIGN = [
+  [0, vPool, 'СПА  ·  БАССЕЙН  ·  ДЕТОКС', 'Спа, бассейн және', 'детокс-процедуралар', null],
+  [3.0, vMove, 'ФИТНЕС  ·  ЙОГА  ·  ПИЛАТЕС  ·  КРИОТЕРАПИЯ', 'Қозғалыс пен', 'қалпына келу', null],
+  [6.0, vFood, 'ENERGY CUISINE', 'Ф. К. Майр ілімі', 'негізіндегі тамақтану', 'dark'],
+  [9.0, vRest, 'ТЫНЫШТЫҚ  ·  ҰЙҚЫ  ·  ТАБИҒАТ', '55–250 м² бөлмелер', 'мен люкстер', null],
+];
+function s4(c, t) {
+  for (let i = 0; i < VIGN.length; i++) {
+    const [t0, fn, cap, l1, l2, tone] = VIGN[i], t1 = i < 3 ? VIGN[i + 1][0] + .5 : 99; if (t < t0 || t > t1) continue;
+    const a = i === 0 ? 1 : ss(t0, t0 + .5, t), bc = bufC.getContext('2d'); bc.clearRect(0, 0, W, H); fn(bc, t - t0 + 1);
+    const dark = tone === 'dark', col = dark ? '#1E2620' : C.cream, gold = dark ? '#8A7350' : C.gold;
+    if (!dark) { const g = bc.createLinearGradient(0, 0, W * .5, 0); g.addColorStop(0, 'rgba(8,12,10,.55)'); g.addColorStop(1, 'rgba(8,12,10,0)'); bc.fillStyle = g; bc.fillRect(0, 0, W, H); }
+    const lt = t - t0;
+    rev(bc, cap, 140, 420, { font: SANS, size: 19, weight: 500, color: gold, track: 5 }, lt, .25);
+    rev(bc, l1, 136, 520, { size: 80, color: col }, lt, .45);
+    rev(bc, l2, 136, 604, { size: 80, italic: true, color: col }, lt, .7);
+    c.save(); c.globalAlpha = a; c.drawImage(bufC, 0, 0); c.restore();
+  }
+}
+// S5 — programmes
+const PROG = [
+  ['Lanserhof Classic', 'Lanserhof тұжырымдамасының негізі: ағзаны қалпына келтіру мен өміршеңдікке арналған бастапқы бағдарлама.'],
+  ['Longevity Medicine', 'Биологиялық қартаюға әсер етуге бағытталған дәл диагностика мен мақсатты терапия.'],
+  ['Stress Resilience', 'Стресстің физиологиялық және психологиялық әсерімен дәрігер басшылығымен жұмыс.'],
+  ['Deep Sleep', 'Заманауи диагностика мен дәрісіз терапия арқылы сапалы ұйқыны қалпына келтіру.'],
+  ['Sports Performance', 'Ақылды жаттығу, дұрыс қозғалыс және мақсатты қалпына келу.'],
+];
+let s5bg = null;
+function s5(c, t) {
+  if (!s5bg) { const sc = bufS.getContext('2d'); land(bufL.getContext('2d'), { t: 50, tod: .45, zoom: 1.1, fx: 100, fy: 40, pan: 0, resort: 1, mist: .6 }); sc.drawImage(bufL, 0, 0, 480, 270); s5bg = mk(); const b = s5bg.getContext('2d'); b.imageSmoothingQuality = 'high'; b.drawImage(bufS, 0, 0, W, H); }
+  const z = lerp(1.08, 1.0, t / 14.6); c.save(); c.translate(W / 2, H / 2); c.scale(z, z); c.drawImage(s5bg, -W / 2, -H / 2); c.restore();
+  c.fillStyle = 'rgba(9,14,12,.62)'; c.fillRect(0, 0, W, H);
+  rev(c, 'МЕДИЦИНАЛЫҚ БАҒДАРЛАМАЛАР', 140, 260, { font: SANS, size: 19, weight: 500, color: C.gold, track: 5 }, t, .3);
+  const slot = 2.65, start = 1.0, cur = clamp(Math.floor((t - start) / slot), 0, 4);
+  for (let i = 0; i < 5; i++) { const y = 380 + i * 64, act = i === cur && t > start, a = eo((t - .5 - i * .12) / .9);
+    txt(c, PROG[i][0], 172, y, { font: SANS, size: 24, weight: act ? 500 : 400, color: act ? C.cream : C.dim, alpha: a });
+    if (act) { c.save(); c.globalAlpha = a; c.fillStyle = C.gold; c.fillRect(140, y - 20, 3, 26); c.restore(); } }
+  line(c, 640, 330, 640, 720, C.cream, .15 * eo(t - .5));
+  for (let i = 0; i < 5; i++) { const t0 = start + i * slot, t1 = i < 4 ? t0 + slot + .3 : 99, lt = t;
+    rev(c, `0${i + 1} / 05`, 760, 400, { size: 30, italic: true, color: C.gold }, lt, t0, t1, .8);
+    rev(c, PROG[i][0], 754, 500, { size: 96 }, lt, t0 + .1, t1, .9);
+    const ls = wrap(c, PROG[i][1], 980, `italic 300 42px ${SERIF}`); ls.forEach((s, k) => rev(c, s, 760, 590 + k * 54, { size: 42, italic: true, color: C.soft }, lt, t0 + .35 + k * .1, t1, .9)); }
+}
+// S6 — prices & booking
+function row(c, name, price, sub, y, t, t0, t1) {
+  rev(c, name, 260, y, { size: 40 }, t, t0, t1, .9);
+  rev(c, price, 1660, y, { size: 44, color: C.gold, align: 'right', weight: 400 }, t, t0 + .1, t1, .9);
+  if (sub) rev(c, sub, 262, y + 34, { font: SANS, size: 19, color: C.dim }, t, t0 + .15, t1, .9);
+  const a = eo((t - t0) / 1) * (1 - ss(t1 - .6, t1, t)); if (a > 0) line(c, 260, y + 54, 1660, y + 54, C.cream, .12 * a);
+}
+function s6(c, t) {
+  let g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#111A17'); g.addColorStop(1, '#0A0F0D'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  g = c.createRadialGradient(W * .8, H * .2, 0, W * .8, H * .2, 900); g.addColorStop(0, 'rgba(201,180,138,.10)'); g.addColorStop(1, 'rgba(201,180,138,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  // A — medical prices
+  let A1 = 5.4;
+  rev(c, 'РЕСМИ БАҒАЛАР  ·  2026  ·  EUR, ҚҚС ҚОСА', 260, 190, { font: SANS, size: 19, weight: 500, color: C.gold, track: 5 }, t, .3, A1);
+  rev(c, 'Медициналық бағдарлама', 256, 280, { size: 72 }, t, .5, A1);
+  rev(c, 'адам басына  ·  тұру бағасы кірмейді', 260, 330, { font: SANS, size: 24, color: C.soft }, t, .8, A1);
+  row(c, 'Lanserhof Classic  ·  7 түн', '2 940 €', null, 450, t, 1.1, A1);
+  row(c, 'Lanserhof Classic  ·  8 түн', '3 007 €', null, 540, t, 1.4, A1);
+  row(c, 'Longevity', '5 113 €-дан', 'Classic бағдарламасына қосымша модуль', 630, t, 1.7, A1);
+  row(c, 'Stress Resilience · Deep Sleep · Sports Performance', 'сұраныс бойынша', 'Тегернзе үшін баға жарияланбаған', 740, t, 2.0, A1);
+  rev(c, 'Ең аз мерзім — 7 түн  ·  Дәрігерлер 10–14 түнді ұсынады', 260, 900, { font: SANS, size: 22, color: C.gold }, t, 2.6, A1);
+  // B — accommodation
+  const B0 = 5.0, B1 = 9.8;
+  rev(c, 'ТҰРУ  ·  БІР ТҮНГЕ  ·  2026', 260, 190, { font: SANS, size: 19, weight: 500, color: C.gold, track: 5 }, t, B0, B1);
+  rev(c, 'Бөлмелер мен люкстер', 256, 280, { size: 72 }, t, B0 + .2, B1);
+  rev(c, 'медициналық бағдарламадан бөлек төленеді', 260, 330, { font: SANS, size: 24, color: C.soft }, t, B0 + .4, B1);
+  row(c, 'Double Room  ·  55 м²', '785 €  /  1 150 €', '1 адам  /  2 адам', 450, t, B0 + .6, B1);
+  row(c, 'Parvus · Symphonia Suite  ·  65 м²', '955 €-дан', null, 560, t, B0 + .9, B1);
+  row(c, 'Somnium · Elysium · Infinitas  ·  100 м²', '2 450 – 4 450 €', null, 650, t, B0 + 1.2, B1);
+  row(c, 'Pavillon Suite  ·  250 м²', 'сұраныс бойынша', null, 740, t, B0 + 1.5, B1);
+  rev(c, 'Бағаға: дәрігер тағайындаған тамақ, шөп шайлары, минерал су, сілтілі сорпа', 260, 880, { font: SANS, size: 22, color: C.gold }, t, B0 + 2.0, B1);
+  rev(c, 'Бөлме бағасы тек Lanserhof медициналық бағдарламасымен бірге қолданылады', 260, 920, { font: SANS, size: 22, color: C.dim }, t, B0 + 2.2, B1);
+  // C — booking
+  const C0 = 9.5;
+  rev(c, 'БРОНДАУ', 260, 190, { font: SANS, size: 19, weight: 500, color: C.gold, track: 5 }, t, C0);
+  rev(c, 'Бес қадам', 256, 280, { size: 72 }, t, C0 + .2);
+  const steps = ['lanserhof.com ресми сайтына кіріңіз', 'Бағдарламаны таңдаңыз', 'Брондау бөлімімен байланысыңыз', 'Күндер мен бөлмені келісіңіз', 'Сұраныс жіберіп, төлем шарттарын растаңыз'];
+  steps.forEach((s, i) => { const y = 410 + i * 92, t0 = C0 + .5 + i * .7; rev(c, `${i + 1}`, 262, y, { size: 58, italic: true, color: C.gold }, t, t0, 99, .8); rev(c, s, 340, y - 6, { font: SANS, size: 32, color: C.cream }, t, t0 + .1, 99, .8); });
+  rev(c, '+49 8022 18800   ·   info.tegernsee@lanserhof.com', 260, 900, { font: SANS, size: 24, color: C.cream }, t, C0 + 4.3);
+  rev(c, '50%-ға дейін аванс сұралуы мүмкін  ·  Visa · Mastercard · American Express  ·  4 аптадан аз қалғанда бас тартсаңыз — 50% айыппұл', 260, 942, { font: SANS, size: 19, color: C.dim }, t, C0 + 4.6);
+}
+// S7 — final call to action
+function s7(c, t) {
+  const p = t / 10;
+  land(c, { t: t + 74, tod: .86, zoom: lerp(1.42, 1.02, eio(p)), fx: lerp(280, 40, eio(p)), fy: lerp(120, 10, eio(p)), pan: lerp(60, -60, p), resort: 1, mist: .55 });
+  c.fillStyle = 'rgba(8,12,10,.30)'; c.fillRect(0, 0, W, H); legibility(c, 'top', .45);
+  rev(c, 'Lanserhof Tegernsee', W / 2, 300, { size: 112, align: 'center', shadow: 30 }, t, .8, 99, 1.6);
+  rev(c, 'Денсаулығыңызға инвестиция салыңыз.', W / 2, 400, { size: 50, italic: true, align: 'center', shadow: 20 }, t, 1.8, 99, 1.4);
+  rev(c, 'Әл-ауқаттың жаңа деңгейін сезініңіз.', W / 2, 464, { size: 50, italic: true, align: 'center', shadow: 20 }, t, 2.4, 99, 1.4);
+  rev(c, 'WWW.LANSERHOF.COM', W / 2, 560, { font: SANS, size: 24, weight: 500, color: C.gold, align: 'center', track: 8, shadow: 14 }, t, 3.4, 99, 1.2);
+  rev(c, 'Концепт-жоба, Lanserhof-тың ресми жарнамасы емес  ·  Бағалар: lanserhof.com ресми прайс-парақтары, 2026; ескертусіз өзгеруі мүмкін', W / 2, 1030, { font: SANS, size: 16, color: C.dim, align: 'center' }, t, 4.2);
+}
+
+const SC = [[0, 10.6, s1], [10, 20.6, s2], [20, 32.6, s3], [32, 44.6, s4], [44, 58.6, s5], [58, 74.6, s6], [74, DUR, s7]];
+let frame = 0;
+function seek(t) {
+  ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  let k = 0;
+  for (const [a, b, f] of SC) {
+    if (t < a || t > b) continue;
+    const bc = bufs[k++ % 2].getContext('2d'); bc.setTransform(1, 0, 0, 1, 0, 0); bc.globalAlpha = 1; bc.clearRect(0, 0, W, H);
+    f(bc, t - a);
+    ctx.globalAlpha = a === 0 ? 1 : ss(a, a + .6, t); ctx.drawImage(bc.canvas, 0, 0);
+  }
+  ctx.globalAlpha = 1; ctx.drawImage(vign, 0, 0);
+  ctx.save(); ctx.globalAlpha = .05; ctx.globalCompositeOperation = 'overlay'; ctx.drawImage(grains[Math.floor(t * 24) % 4], 0, 0, W, H); ctx.restore();
+  const fin = ss(0, .8, t) * (1 - ss(DUR - 1.6, DUR - .1, t)); if (fin < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - fin})`; ctx.fillRect(0, 0, W, H); }
+}
+window.seek = seek;
+window.ready = (async () => {
+  const faces = ['300', '400', '500', 'italic 300', 'italic 400'];
+  await Promise.all(faces.map(f => document.fonts.load(`${f} 40px "Cormorant Garamond"`, 'Әә Ғғ Ққ Ңң Өө Ұұ Үү Һһ Іі АБВ abc 0123'))); await document.fonts.ready; return true;
+})();
+if (!location.search.includes('render')) { window.ready.then(() => { const t0 = performance.now(); const loop = () => { seek(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); }; loop(); }); }
+</script>
+</body>
+</html>
